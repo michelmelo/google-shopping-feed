@@ -93,7 +93,7 @@ class Item
     {
         $node = new Node('title');
         $title = $this->safeCharEncodeText($title);
-        $this->nodes['title'] = $node->value($title)->addCdata();
+        $this->nodes['title'] = $node->value($title)->_namespace($this->namespace)->addCdata();
     }
 
     /**
@@ -103,7 +103,16 @@ class Item
     {
         $node = new Node('link');
         $link = $this->safeCharEncodeURL($link);
-        $this->nodes['link'] = $node->value($link)->addCdata();
+        $this->nodes['link'] = $node->value($link)->_namespace($this->namespace)->addCdata();
+    }
+
+    /**
+     * @param $link
+     */
+    public function ads_redirect($link)
+    {
+        $node = new Node('ads_redirect');
+        $this->nodes['ads_redirect'] = $node->value($link)->_namespace($this->namespace)->addCdata();
     }
 
     /**
@@ -133,14 +142,28 @@ class Item
     }
 
     /**
-     * @param $description
+     * @param $salePriceEffectiveDate
      */
-    public function description($description)
+    public function sale_price_effective_date($salePriceEffectiveDate)
     {
+        $node = new Node('sale_price_effective_date');
+        $this->nodes['sale_price_effective_date'] = $node->value( $salePriceEffectiveDate )->_namespace($this->namespace);
+    }
+
+    /**
+     * @param $description
+     * @param string $encoding
+     */
+    public function description($description, string $encoding = '')
+    {
+        if (empty($encoding)) {
+            $encoding = mb_internal_encoding();
+        }
+
         $description = preg_replace( "#<iframe[^>]+>[^<]?</iframe>#is", '', $description );
         $node = new Node('description');
         $description = $this->safeCharEncodeText($description);
-        $this->nodes['description'] = $node->value(substr($description, 0, 5000))->_namespace($this->namespace)->addCdata();
+        $this->nodes['description'] = $node->value(mb_substr($description, 0, 5000, $encoding))->_namespace($this->namespace)->addCdata();
     }
 
     /**
@@ -200,9 +223,7 @@ class Item
     }
 
     /**
-     * [is_bundle description]
-     * @param  [type]  $bundle [description]
-     * @return boolean         [description]
+     * @param $bundle
      */
     public function is_bundle($bundle)
     {
@@ -225,7 +246,7 @@ class Item
     public function product_type($productType)
     {
         $node = new Node('product_type');
-        $brand = $this->safeCharEncodeText($productType);
+        $productType = $this->safeCharEncodeText($productType);
         $this->nodes['product_type'] = $node->value($productType)->_namespace($this->namespace)->addCdata();
     }
 
@@ -257,6 +278,24 @@ class Item
     }
 
     /**
+     * @param $multipack
+     */
+    public function multipack($multipack)
+    {
+        $node = new Node('multipack');
+        $this->nodes['multipack'] = $node->value($multipack)->_namespace($this->namespace);
+    }
+
+    /**
+     * @param $unitPricingMeasure
+     */
+    public function unitPricingMeasure($unitPricingMeasure)
+    {
+        $node = new Node('unit_​pricing_​measure');
+        $this->nodes['unit_​pricing_​measure'] = $node->value($unitPricingMeasure)->_namespace($this->namespace);
+    }
+
+    /**
      * @param $code
      * @param $service
      * @param $cost
@@ -265,7 +304,7 @@ class Item
     public function shipping($code, $service, $cost, $region = null)
     {
         $node = new Node('shipping');
-        $value = "<g:country>{$code}</g:country><g:service>{$service}</g:service><g:price>{$cost}</g:price>";
+        $value = "<g:country>{$code}</g:country><g:service><![CDATA[{$service}]]></g:service><g:price>{$cost}</g:price>";
 
         if($region) {
           $value .= "<g:region>{$region}</g:region>";
@@ -446,7 +485,7 @@ class Item
      */
     public function cloneIt()
     {
-       $groupIdentifiers = $this->getGroupIdentifier();
+        $groupIdentifiers = $this->getGroupIdentifier();
         /** @var Item $item */
         $item = $this->googleShoppingFeed->createItem();
         $this->item_group_id( $groupIdentifiers );
@@ -454,17 +493,28 @@ class Item
             if (is_array($node)) {
                 // multiple accepted values..
                 $name = $node[0]->get('name');
+                $multipleNodes = array();
                 foreach ($node as $_node) {
                     if ($name == 'shipping') {
                         // Shipping has another layer so we are going to have to do a little hack
                         $xml = simplexml_load_string('<foo>' . trim(str_replace('g:', '', $_node->get('value'))) . '</foo>');
                         $item->{$_node->get('name')}($xml->country, $xml->service, $xml->price);
                     } else {
-                        $item->{$name}($_node->get('value'));
+                        $multipleNodes[$name][] = $_node->get('value');
                     }
                 }
+                if (count($multipleNodes)) {
+                    $item->{$name}($multipleNodes[$name]);
+                }
             } elseif ($node->get('name') !== 'shipping') {
-                $item->{$node->get('name')}($node->get('value'));
+                if (method_exists($item, $node->get('name'))) {
+                    $item->{$node->get('name')}($node->get('value'));
+                    continue;
+                }
+
+                if (!method_exists($item, $node->get('name'))) {
+                    $item->custom($node->get('name'), ($node->get('value')));
+                }
             }
         }
         return $item;
